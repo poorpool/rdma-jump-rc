@@ -84,6 +84,18 @@ public:
   }
 
   void post_send(void *msg, uint64_t offset, uint64_t len) {
+    while (wc_wait_ >= kCqLen) { // 在途不得超过 cq_len
+      int tmp = ibv_poll_cq(cq_, kCqLen, wc_);
+      for (int i = 0; i < tmp; i++) {
+        if (wc_[i].opcode == IBV_WC_RECV) {
+          ;
+        } else if (wc_[i].opcode == IBV_WC_SEND) {
+          wc_wait_--;
+        } else {
+          LOG("err wc_[i] opcode", wc_[i].opcode);
+        }
+      }
+    }
     ibv_sge sge{.addr = reinterpret_cast<uint64_t>(msg) + offset,
                 .length = static_cast<uint32_t>(len),
                 .lkey = outer_mr_map_[msg]->lkey};

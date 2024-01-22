@@ -109,19 +109,9 @@ private:
             case IBV_WC_RECV: {
               recv_num_++;
 
-              while (client_.wc_wait_ >= kCqLen) {
-                int tmp = ibv_poll_cq(client_.cq_, kCqLen, client_.wc_);
-                for (int j = 0; j < tmp; j++) {
-                  if (client_.wc_[j].opcode == IBV_WC_SEND) {
-                    client_.wc_wait_--;
-                  } else {
-                    LOG("err wci opcode", client_.wc_[i].opcode);
-                  }
-                }
-              }
               client_.post_send(data_, send_offset_, kGrain);
               post_recv(kGrain);
-              post_send(1);
+              // post_send(1);
               break;
             }
             default:

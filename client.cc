@@ -20,26 +20,14 @@ int main(int argc, char *argv[]) {
     data[i] = 'a' + i % 26;
 
   LOG("client registered mr");
-  for (int i = 0; i < kQueueLen; i++) {
-    client.post_recv(recv_data, i * kGrain, kGrain);
-  }
+  // 不必使用 ACK 控制在途包,使用post_send()里面的控制就好了
+  // for (int i = 0; i < kQueueLen; i++) {
+  //   client.post_recv(recv_data, i * kGrain, kGrain);
+  // }
 
-  LOG("client start!");
+  LOG("client start, please waiting...");
 
   for (size_t siz = 0; siz < kGrain * kSendPacks; siz += kGrain) {
-    while (client.wc_wait_ >= kCqLen) { // 在途不得超过 cq_len
-      int tmp = ibv_poll_cq(client.cq_, kCqLen, client.wc_);
-      for (int i = 0; i < tmp; i++) {
-        if (client.wc_[i].opcode == IBV_WC_RECV) {
-          client.wc_wait_--;
-          client.post_recv(recv_data, client.wc_[i].wr_id, kGrain);
-        } else if (client.wc_[i].opcode == IBV_WC_SEND) {
-          ;
-        } else {
-          LOG("err wc_[i] opcode", client.wc_[i].opcode);
-        }
-      }
-    }
     client.post_send(data, siz % kQueueLen, kGrain);
   }
   LOG("client end!");

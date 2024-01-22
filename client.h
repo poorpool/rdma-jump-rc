@@ -3,7 +3,6 @@
 #include <sys/types.h>
 
 class RDMAClient {
-
 public:
   RDMAClient() = default;
 
@@ -49,14 +48,14 @@ public:
     if (!pd_)
       LOG(__LINE__, "failed to alloc pd");
 
-    cq_ = ibv_create_cq(cm_id_->verbs, queue_len * 2, nullptr, nullptr, 0);
+    cq_ = ibv_create_cq(cm_id_->verbs, kQueueLen * 2, nullptr, nullptr, 0);
     if (!cq_)
       LOG(__LINE__, "failed to create cq");
 
     ibv_qp_init_attr qp_init_attr{.send_cq = cq_,
                                   .recv_cq = cq_,
-                                  .cap{.max_send_wr = queue_len,
-                                       .max_recv_wr = queue_len,
+                                  .cap{.max_send_wr = kQueueLen,
+                                       .max_recv_wr = kQueueLen,
                                        .max_send_sge = 1,
                                        .max_recv_sge = 1},
                                   .qp_type = IBV_QPT_RC};
@@ -114,7 +113,7 @@ public:
   }
   void close() {
     while (wc_wait_)
-      wc_wait_ -= ibv_poll_cq(cq_, cq_len, wc_);
+      wc_wait_ -= ibv_poll_cq(cq_, kCqLen, wc_);
     rdma_disconnect(cm_id_);
     for (auto &[ptr, mr] : outer_mr_map_)
       ibv_dereg_mr(mr);
@@ -131,7 +130,7 @@ public:
 
   uint64_t wc_wait_{};
   ibv_cq *cq_{};
-  ibv_wc wc_[cq_len]{};
+  ibv_wc wc_[kCqLen]{};
 
 private:
   rdma_event_channel *chan_{};

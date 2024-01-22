@@ -9,32 +9,30 @@ int main(int argc, char *argv[]) {
   }
 
   RDMAClient client;
-  client.connect(argv[1], forwarder_port);
+  client.connect(argv[1], kForwarderPort);
 
-  size_t data_size = static_cast<size_t>(queue_len) * grain; // 循环内存区域大小
+  char *data = static_cast<char *>(malloc(kBufferSize));
+  char *recv_data = static_cast<char *>(malloc(kBufferSize));
+  client.reg_mr(data, kBufferSize);
+  client.reg_mr(recv_data, kBufferSize);
 
-  char *data = static_cast<char *>(malloc(data_size));
-  char *recv_data = static_cast<char *>(malloc(data_size));
-  client.reg_mr(data, data_size);
-  client.reg_mr(recv_data, data_size);
-
-  for (size_t i = 0; i < data_size; i++)
+  for (size_t i = 0; i < kBufferSize; i++)
     data[i] = 'a' + i % 26;
 
   LOG("client registered mr");
-  for (int i = 0; i < queue_len; i++) {
-    client.post_recv(recv_data, i * grain, grain);
+  for (int i = 0; i < kQueueLen; i++) {
+    client.post_recv(recv_data, i * kGrain, kGrain);
   }
 
   LOG("client start!");
 
-  for (size_t siz = 0; siz < grain * sendPacks; siz += grain) {
-    while (client.wc_wait_ >= cq_len) { // 在途不得超过 cq_len
-      int tmp = ibv_poll_cq(client.cq_, cq_len, client.wc_);
+  for (size_t siz = 0; siz < kGrain * kSendPacks; siz += kGrain) {
+    while (client.wc_wait_ >= kCqLen) { // 在途不得超过 cq_len
+      int tmp = ibv_poll_cq(client.cq_, kCqLen, client.wc_);
       for (int i = 0; i < tmp; i++) {
         if (client.wc_[i].opcode == IBV_WC_RECV) {
           client.wc_wait_--;
-          client.post_recv(recv_data, client.wc_[i].wr_id, grain);
+          client.post_recv(recv_data, client.wc_[i].wr_id, kGrain);
         } else if (client.wc_[i].opcode == IBV_WC_SEND) {
           ;
         } else {
@@ -42,7 +40,7 @@ int main(int argc, char *argv[]) {
         }
       }
     }
-    client.post_send(data, siz % queue_len, grain);
+    client.post_send(data, siz % kQueueLen, kGrain);
   }
   LOG("client end!");
   client.close();

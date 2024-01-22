@@ -4,7 +4,8 @@
 class RDMAForwarder {
 public:
   RDMAForwarder() = default;
-  void transfer(char *source, char *dest, int listen_port) {
+
+  void transfer(const char *source, const char *dest, int listen_port) {
     strncpy(dest_, dest, strlen(dest));
 
     int num_devices{};
@@ -57,11 +58,13 @@ public:
       }
     }
   }
+
   void stop() {
     stop_ = true;
     for (auto &[id, worker] : worker_map_)
       worker->stop(), worker->t_->join();
   }
+
   ~RDMAForwarder() {
     rdma_free_devices(ctx_list_);
     ibv_dealloc_pd(pd_);
@@ -75,23 +78,23 @@ private:
   class Worker {
   public:
     Worker(char *dest, ibv_pd *pd) {
-      client_.connect(dest, server_port);
-      data_ = (char *)malloc(queue_len * grain);
-      client_.reg_mr(data_, queue_len * grain);
-      data_mr_ = ibv_reg_mr(pd, data_, queue_len * grain,
+      client_.connect(dest, kServerPort);
+      // 两端之中介
+      data_ = (char *)malloc(kBufferSize);
+      client_.reg_mr(data_, kBufferSize);
+      data_mr_ = ibv_reg_mr(pd, data_, kBufferSize,
                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                                 IBV_ACCESS_REMOTE_WRITE);
-      LOG("reged mr");
-      void *tmp;
-      posix_memalign(&tmp, 4096, queue_len * grain);
-
     }
+
     void run() {
-      ibv_wc wc[cq_len]{};
-      uint64_t timer{}, start{};
-      uint64_t recv_wait{};
-      while (recv_wait < queue_len && recv_num_ + recv_wait < sendPacks)
-        post_recv(grain), recv_wait++;
+      ibv_wc wc[kCqLen]{};
+      uint64_t timer{};
+      uint64_t start{};
+
+      for (int i = 0; i < kQueueLen; i++) {
+        post_recv(kGrain);
+      }
 
       for (;;) {
         if (stop_) {
@@ -99,30 +102,26 @@ private:
           return;
         }
 
-        int wc_num = ibv_poll_cq(cq_, cq_len, wc);
-        // recv_num_ += wc_num;
+        int wc_num = ibv_poll_cq(cq_, kCqLen, wc);
         if (wc_num) {
-          for (int i{}; i < wc_num; ++i) {
+          for (int i = 0; i < wc_num; ++i) {
             switch (wc[i].opcode) {
             case IBV_WC_RECV: {
               recv_num_++;
-            //   LOG("forward received", cnt_++);
-                cnt_++;
-              while (client_.wc_wait_ >= cq_len) {
-                // LOG("waiting", client_.wc_wait_, cq_len);
-                int tmp = ibv_poll_cq(client_.cq_, cq_len, client_.wc_);
-                for (int i = 0; i < tmp; i++) {
-                  if (client_.wc_[i].opcode == IBV_WC_SEND) {
+
+              while (client_.wc_wait_ >= kCqLen) {
+                int tmp = ibv_poll_cq(client_.cq_, kCqLen, client_.wc_);
+                for (int j = 0; j < tmp; j++) {
+                  if (client_.wc_[j].opcode == IBV_WC_SEND) {
                     client_.wc_wait_--;
                   } else {
                     LOG("err wci opcode", client_.wc_[i].opcode);
                   }
                 }
               }
-              client_.post_send(data_, send_offset_, grain);
-              post_recv(grain);
+              client_.post_send(data_, send_offset_, kGrain);
+              post_recv(kGrain);
               post_send(1);
-
               break;
             }
             default:
@@ -133,8 +132,9 @@ private:
       }
     }
     void stop() {
-      while (recv_num_ < sendPacks)
+      while (recv_num_ < kSendPacks) {
         ;
+      }
       client_.close();
       stop_ = true;
       ibv_dereg_mr(data_mr_);
@@ -143,7 +143,7 @@ private:
     }
     ~Worker() {
       free(data_);
-      LOG(__LINE__, "worker destroyed");
+      LOG("forwarder worker destroyed");
     }
     rdma_cm_id *cm_id_{};
     char *data_{};
@@ -154,56 +154,54 @@ private:
     uint64_t recv_num_{};
     std::thread *t_{};
 
-    uint64_t cnt_{};
-
   private:
     RDMAClient client_;
     void post_recv(int len) {
-      //   LOG(__LINE__, "forwarder try to post recv, posted ",
-      //       recv_offset_ / grain);
-      ibv_sge sge{.addr = (uint64_t)data_ + recv_offset_,
-                  .length = len,
+      ibv_sge sge{.addr = reinterpret_cast<uint64_t>(data_) + recv_offset_,
+                  .length = static_cast<uint32_t>(len),
                   .lkey = data_mr_->lkey};
-      ibv_recv_wr wr{.next = nullptr, .sg_list = &sge, .num_sge = 1}, *bad_wr{};
+      ibv_recv_wr wr{.next = nullptr, .sg_list = &sge, .num_sge = 1};
+      ibv_recv_wr *bad_wr{};
       if (ibv_post_recv(cm_id_->qp, &wr, &bad_wr))
         LOG(__LINE__, "forwarder failed to post recv, posted ",
-            recv_offset_ / grain);
-    //   recv_offset_ += grain;
-    recv_offset_ = (recv_offset_ + grain) % (queue_len * grain);
+            recv_offset_ / kGrain);
+
+      recv_offset_ = (recv_offset_ + kGrain) % kBufferSize;
     }
     void post_send(int len) {
-      ibv_sge sge{.addr = (uint64_t)data_ + send_offset_,
-                  .length = len,
+      ibv_sge sge{.addr = reinterpret_cast<uint64_t>(data_) + send_offset_,
+                  .length = static_cast<uint32_t>(len),
                   .lkey = data_mr_->lkey};
       ibv_send_wr wr{.next = nullptr,
                      .sg_list = &sge,
                      .num_sge = 1,
                      .opcode = IBV_WR_SEND,
-                     .send_flags = IBV_SEND_SIGNALED},
-          *bad_wr;
+                     .send_flags = IBV_SEND_SIGNALED};
+      ibv_send_wr *bad_wr;
       if (ibv_post_send(cm_id_->qp, &wr, &bad_wr))
         LOG(__LINE__, "failed to post send");
-    //   send_offset_ += grain;
-    send_offset_ = (send_offset_ + grain) % (queue_len * grain);
+
+      send_offset_ = (send_offset_ + kGrain) % kBufferSize;
     }
   };
+  
   void create_connection(rdma_cm_id *cm_id) {
     int num_devices{};
-    ibv_cq *cq{ibv_create_cq(ctx_list_[0], queue_len * 2, nullptr, nullptr, 0)};
+    ibv_cq *cq{ibv_create_cq(ctx_list_[0], kQueueLen * 2, nullptr, nullptr, 0)};
     if (!cq)
       LOG(__LINE__, "failed to create cq");
 
     ibv_qp_init_attr qp_init_attr{.send_cq = cq,
                                   .recv_cq = cq,
-                                  .cap{.max_send_wr = queue_len,
-                                       .max_recv_wr = queue_len,
+                                  .cap{.max_send_wr = kQueueLen,
+                                       .max_recv_wr = kQueueLen,
                                        .max_send_sge = 1,
                                        .max_recv_sge = 1},
                                   .qp_type = IBV_QPT_RC};
     if (rdma_create_qp(cm_id, pd_, &qp_init_attr))
       LOG(__LINE__, "failed to create qp");
 
-    Worker *worker = new Worker(dest_, pd_);
+    auto *worker = new Worker(dest_, pd_);
     worker->cm_id_ = cm_id, worker->cq_ = cq;
     worker->t_ = new std::thread(&Worker::run, worker);
     worker_map_[cm_id] = worker;

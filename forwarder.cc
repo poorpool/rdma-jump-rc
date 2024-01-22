@@ -1,7 +1,7 @@
 #include "forwarder.h"
 
-int main(int argc, char **argv) {
+int main() {
   RDMAForwarder forwarder;
-  forwarder.transfer("0.0.0.0", "192.168.200.53", forwarder_port);
+  forwarder.transfer("0.0.0.0", "192.168.200.53", kForwarderPort);
   return 0;
 }

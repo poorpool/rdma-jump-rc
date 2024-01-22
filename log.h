@@ -14,12 +14,13 @@
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 #include <rdma/rdma_verbs.h>
-const size_t grain{47 * 1024};
-const int cq_len{16};
-const int server_port{13333};
-const int forwarder_port{14444};
-const int queue_len = 1024;
-uint64_t sendPacks{2500000};
+constexpr size_t kGrain{47 * 1024};
+constexpr int kCqLen{16};
+constexpr int kServerPort{13333};
+constexpr int kForwarderPort{14444};
+constexpr int kQueueLen = 1024;
+constexpr uint64_t kSendPacks{2500000};
+constexpr size_t kBufferSize = kGrain * kQueueLen;
 
 struct LOGGER {
   template <typename... Args> void operator()(Args &&...args) const {

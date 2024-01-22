@@ -1,9 +1,12 @@
 #include "log.h"
 #include <infiniband/verbs.h>
+#include <sys/types.h>
 
 class RDMAClient {
+
 public:
   RDMAClient() = default;
+
   void connect(const char *ip, int port) {
     chan_ = rdma_create_event_channel();
     if (!chan_)
@@ -46,7 +49,7 @@ public:
     if (!pd_)
       LOG(__LINE__, "failed to alloc pd");
 
-    cq_ = ibv_create_cq(cm_id_->verbs, queue_len, nullptr, nullptr, 0);
+    cq_ = ibv_create_cq(cm_id_->verbs, queue_len * 2, nullptr, nullptr, 0);
     if (!cq_)
       LOG(__LINE__, "failed to create cq");
 
@@ -68,50 +71,44 @@ public:
       LOG(__LINE__, "failed to establish connect");
     rdma_ack_cm_event(event);
   }
+
   ibv_mr *reg_mr(void *ptr, uint64_t len) {
     return outer_mr_map_[ptr] =
                ibv_reg_mr(pd_, ptr, len,
                           IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                               IBV_ACCESS_REMOTE_WRITE);
   }
+
   void dereg_mr(void *ptr) {
     ibv_dereg_mr(outer_mr_map_[ptr]);
     outer_mr_map_.erase(ptr);
   }
+
   void post_send(void *msg, uint64_t offset, uint64_t len) {
-    // LOG("post send to server", cnt_++);
-    cnt_++;
-    ibv_sge sge{.addr = (uint64_t)msg + offset,
-                .length = len,
+    ibv_sge sge{.addr = reinterpret_cast<uint64_t>(msg) + offset,
+                .length = static_cast<uint32_t>(len),
                 .lkey = outer_mr_map_[msg]->lkey};
     ibv_send_wr wr{.next = nullptr,
                    .sg_list = &sge,
                    .num_sge = 1,
                    .opcode = IBV_WR_SEND,
-                   .send_flags = IBV_SEND_SIGNALED},
-        *bad_wr;
+                   .send_flags = IBV_SEND_SIGNALED};
+    ibv_send_wr *bad_wr;
 
-    // void *ctx{};
     if (ibv_post_send(cm_id_->qp, &wr, &bad_wr))
       LOG(__LINE__, "failed to post client-send", bad_wr->send_flags);
-    // if(ibv_get_cq_event(comp_chan_, &cq_, &ctx))LOG(__LINE__, "failed to get
-    // cq event"); if(!ibv_poll_cq(cq_,1,&wc))LOG(__LINE__, "failed to poll
-    // cq"); if(ibv_req_notify_cq(cq_, 0))LOG(__LINE__, "failed to notify cq");
-    // ibv_ack_cq_events(cq_, 1);
+
     wc_wait_++;
-    // LOG(wc_wait_);
-    // wc_wait_ -= ibv_poll_cq(cq_, cq_len, wc_);
-    // LOG(wc_wait_);
   }
+
   void post_recv(void *dest, uint64_t offset, uint64_t len) {
-    ibv_sge sge{.addr = (uint64_t)dest + offset,
-                .length = len,
+    ibv_sge sge{.addr = reinterpret_cast<uint64_t>(dest) + offset,
+                .length = static_cast<uint32_t>(len),
                 .lkey = outer_mr_map_[dest]->lkey};
     ibv_recv_wr wr{
-        .wr_id = offset, .next = nullptr, .sg_list = &sge, .num_sge = 1},
-        *bad_wr{};
+        .wr_id = offset, .next = nullptr, .sg_list = &sge, .num_sge = 1};
+    ibv_recv_wr *bad_wr{};
 
-    ibv_wc wc{};
     if (ibv_post_recv(cm_id_->qp, &wr, &bad_wr))
       LOG(__LINE__, "client failed to post recv");
   }
@@ -132,17 +129,13 @@ public:
     rdma_destroy_event_channel(chan_);
   }
 
-  char *recv_data;
+  uint64_t wc_wait_{};
+  ibv_cq *cq_{};
+  ibv_wc wc_[cq_len]{};
 
-public:
+private:
   rdma_event_channel *chan_{};
   rdma_cm_id *cm_id_{};
   ibv_pd *pd_{};
-  // ibv_comp_channel *comp_chan_{};
-  ibv_cq *cq_{};
-  ibv_wc wc_[cq_len]{};
   std::map<void *, ibv_mr *> outer_mr_map_{};
-  uint64_t wc_wait_{};
-  uint64_t cnt_{};
-  uint64_t send_response_num{};
 };

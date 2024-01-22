@@ -84,9 +84,7 @@ private:
       LOG("reged mr");
       void *tmp;
       posix_memalign(&tmp, 4096, queue_len * grain);
-      client_.recv_data = (char *)tmp;
-      LOG("reged aligned_alloc", client_.recv_data);
-      client_.reg_mr(client_.recv_data, queue_len * grain);
+
     }
     void run() {
       ibv_wc wc[cq_len]{};
@@ -94,10 +92,7 @@ private:
       uint64_t recv_wait{};
       while (recv_wait < queue_len && recv_num_ + recv_wait < sendPacks)
         post_recv(grain), recv_wait++;
-      for (int i = 0; i < queue_len; i++) {
-        LOG("try client_post recv", i);
-        client_.post_recv(client_.recv_data, i * grain, grain);
-      }
+
       for (;;) {
         if (stop_) {
           LOG("forwarded num:", recv_num_);
@@ -194,7 +189,7 @@ private:
   };
   void create_connection(rdma_cm_id *cm_id) {
     int num_devices{};
-    ibv_cq *cq{ibv_create_cq(ctx_list_[0], queue_len, nullptr, nullptr, 0)};
+    ibv_cq *cq{ibv_create_cq(ctx_list_[0], queue_len * 2, nullptr, nullptr, 0)};
     if (!cq)
       LOG(__LINE__, "failed to create cq");
 

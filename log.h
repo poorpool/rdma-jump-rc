@@ -14,7 +14,7 @@
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 #include <rdma/rdma_verbs.h>
-const int grain{47 * 1024};
+const size_t grain{47 * 1024};
 const int cq_len{16};
 const int server_port{13333};
 const int forwarder_port{14444};

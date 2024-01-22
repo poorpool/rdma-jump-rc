@@ -185,7 +185,7 @@ private:
     // notify cq");
     Worker *worker = new Worker;
     ibv_cq_init_attr_ex cq_attr_ex{};
-    cq_attr_ex.cqe = queue_len;
+    cq_attr_ex.cqe = queue_len * 2;
     cq_attr_ex.cq_context = nullptr;
     cq_attr_ex.channel = nullptr;
     cq_attr_ex.comp_vector = 0;

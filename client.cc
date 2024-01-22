@@ -1,49 +1,53 @@
 #include "client.h"
 #include <cstdlib>
 #include <infiniband/verbs.h>
-using ll = long long;
 
-int main(int argc, char **argv) {
+int main(int argc, char *argv[]) {
+  if (argc != 2) {
+    printf("Usage: %s <server_ip>\n", argv[0]);
+    return 0;
+  }
+
   RDMAClient client;
   client.connect(argv[1], forwarder_port);
-  auto data_size = queue_len * grain;
-  auto data = (char *)malloc(data_size);
-  void *tmp;
-  posix_memalign(&tmp, 4096, queue_len * grain);
-  client.recv_data = (char *)tmp;
-  LOG(__LINE__, "connected");
+
+  size_t data_size = static_cast<size_t>(queue_len) * grain; // 循环内存区域大小
+
+  char *data = static_cast<char *>(malloc(data_size));
+  char *recv_data = static_cast<char *>(malloc(data_size));
   client.reg_mr(data, data_size);
-  client.reg_mr(client.recv_data, queue_len * grain);
-  for (ll i{}; i < data_size; ++i)
+  client.reg_mr(recv_data, data_size);
+
+  for (size_t i = 0; i < data_size; i++)
     data[i] = 'a' + i % 26;
-  LOG(__LINE__, "connected");
+
+  LOG("client registered mr");
   for (int i = 0; i < queue_len; i++) {
-    client.post_recv(client.recv_data, i * grain, grain);
+    client.post_recv(recv_data, i * grain, grain);
   }
-  LOG(__LINE__, "start!");
-  for (ll i{}; i < grain * sendPacks; i += grain) {
-    while (client.wc_wait_ >= cq_len) {
-      // LOG("waiting", client.wc_wait_, cq_len);
+
+  LOG("client start!");
+
+  for (size_t siz = 0; siz < grain * sendPacks; siz += grain) {
+    while (client.wc_wait_ >= cq_len) { // 在途不得超过 cq_len
       int tmp = ibv_poll_cq(client.cq_, cq_len, client.wc_);
       for (int i = 0; i < tmp; i++) {
         if (client.wc_[i].opcode == IBV_WC_RECV) {
           client.wc_wait_--;
-          client.post_recv(client.recv_data, client.wc_[i].wr_id, grain);
-          //   LOG("get send response", client.send_response_num++);
-          client.send_response_num++;
+          client.post_recv(recv_data, client.wc_[i].wr_id, grain);
         } else if (client.wc_[i].opcode == IBV_WC_SEND) {
-
+          ;
         } else {
-          LOG("err wci opcode", client.wc_[i].opcode);
+          LOG("err wc_[i] opcode", client.wc_[i].opcode);
         }
       }
     }
-    // LOG("send", i / grain);
-    client.post_send(data, i % queue_len, grain);
+    client.post_send(data, siz % queue_len, grain);
   }
-  LOG(__LINE__, "end!");
+  LOG("client end!");
   client.close();
+
   free(data);
-  free(client.recv_data);
+  free(recv_data);
   return 0;
 }
